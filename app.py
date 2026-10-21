@@ -12,41 +12,81 @@ st.set_page_config(
 st.title("💸 Where Did My Money Go?")
 st.write("Track your spending and discover unusual transactions.")
 
-# Sample transaction data for our first version
-transactions = pd.DataFrame({
-    "Date": [
-        "2026-10-02", "2026-10-03", "2026-10-04",
-        "2026-10-05", "2026-10-06", "2026-10-07",
-        "2026-10-08", "2026-10-09", "2026-10-10",
-        "2026-10-11", "2026-10-12", "2026-10-13",
-    ],
-    "Category": [
-        "Food", "Transport", "Shopping", "Food",
-        "Bills", "Transport", "Food", "Entertainment",
-        "Shopping", "Food", "Bills", "Transport",
-    ],
-    "Description": [
-        "Groceries", "Bus ticket", "Clothes", "Lunch",
-        "Phone bill", "Tram ticket", "Supermarket",
-        "Cinema", "Headphones", "Restaurant",
-        "Internet bill", "Train ticket",
-    ],
-    "Amount": [
-        45.50, 8.00, 120.00, 22.00,
-        65.00, 6.00, 38.50, 35.00,
-        250.00, 75.00, 55.00, 18.00,
-    ],
-})
+REQUIRED_COLUMNS = ["Date", "Category", "Description", "Amount"]
 
-transactions["Date"] = pd.to_datetime(transactions["Date"])
 
-# Dashboard statistics
+def load_sample_data():
+    return pd.read_csv("sample_transactions.csv")
+
+
+def validate_transactions(data):
+    missing = [col for col in REQUIRED_COLUMNS if col not in data.columns]
+
+    if missing:
+        return None, f"Missing required columns: {', '.join(missing)}"
+
+    data = data[REQUIRED_COLUMNS].copy()
+
+    data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
+    data["Amount"] = pd.to_numeric(data["Amount"], errors="coerce")
+
+    invalid_rows = data["Date"].isna() | data["Amount"].isna()
+    data = data.loc[~invalid_rows].copy()
+
+    data["Category"] = data["Category"].fillna("Other").astype(str)
+    data["Description"] = data["Description"].fillna("No description").astype(str)
+
+    # Expenses should be positive numbers in this demo.
+    data = data[data["Amount"] > 0].copy()
+
+    if data.empty:
+        return None, "No valid positive transactions were found."
+
+    return data, None
+
+
+st.sidebar.header("Transaction Data")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload a CSV file",
+    type=["csv"],
+)
+
+if uploaded_file is not None:
+    try:
+        raw_data = pd.read_csv(uploaded_file)
+        transactions, error = validate_transactions(raw_data)
+
+        if error:
+            st.error(error)
+            st.stop()
+
+        st.sidebar.success("CSV uploaded successfully.")
+        st.sidebar.caption(
+            "Invalid dates, invalid amounts, zero amounts, "
+            "and negative amounts are excluded."
+        )
+    except Exception as exc:
+        st.error(f"Could not read the CSV file: {exc}")
+        st.stop()
+else:
+    try:
+        raw_data = load_sample_data()
+        transactions, error = validate_transactions(raw_data)
+
+        if error:
+            st.error(error)
+            st.stop()
+    except FileNotFoundError:
+        st.error("sample_transactions.csv was not found in the project folder.")
+        st.stop()
+
+    st.sidebar.info("Using fictional sample transactions.")
+
 total_spending = transactions["Amount"].sum()
 average_transaction = transactions["Amount"].mean()
 largest_transaction = transactions["Amount"].max()
 
 col1, col2, col3 = st.columns(3)
-
 col1.metric("Total Spending", f"{total_spending:.2f} PLN")
 col2.metric("Average Transaction", f"{average_transaction:.2f} PLN")
 col3.metric("Largest Transaction", f"{largest_transaction:.2f} PLN")
@@ -74,6 +114,6 @@ st.subheader("Your Transactions")
 st.dataframe(transactions, use_container_width=True, hide_index=True)
 
 st.caption(
-    "Demo application using fictional transaction data. "
-    "All amounts are in PLN."
+    "Demo application using fictional or user-provided data. "
+    "All amounts are treated as expenses in PLN."
 )
