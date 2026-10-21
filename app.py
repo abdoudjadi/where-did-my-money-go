@@ -161,7 +161,24 @@ fig = px.bar(
 
 st.plotly_chart(fig, use_container_width=True)
 
+
 st.subheader("Machine Learning Results")
+
+normal_count = (analyzed["Anomaly"] == "Normal").sum()
+evaluated_count = (analyzed["Anomaly"] != "Not evaluated").sum()
+
+eval_col1, eval_col2, eval_col3 = st.columns(3)
+eval_col1.metric("Transactions Evaluated", int(evaluated_count))
+eval_col2.metric("Flagged for Review", int(unusual_count))
+eval_col3.metric("Not Flagged", int(normal_count))
+
+st.info(
+    "Evaluation note: Isolation Forest is an unsupervised anomaly-detection "
+    "algorithm. Without independently verified labels, we cannot calculate "
+    "meaningful precision, recall, or accuracy. These counts describe the "
+    "model's output, not its proven ability to detect fraud."
+)
+
 st.write(
     "Isolation Forest compares transaction amounts and flags observations "
     "that look unusual within the uploaded dataset."
