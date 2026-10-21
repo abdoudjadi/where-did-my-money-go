@@ -142,6 +142,27 @@ col2.metric("Average Transaction", f"{average_transaction:.2f} PLN")
 col3.metric("Largest Transaction", f"{largest_transaction:.2f} PLN")
 col4.metric("Unusual Transactions", int(unusual_count))
 
+
+st.subheader("Spending Over Time")
+
+daily_spending = (
+    analyzed.assign(Date=analyzed["Date"].dt.date)
+    .groupby("Date", as_index=False)["Amount"]
+    .sum()
+)
+
+trend_fig = px.line(
+    daily_spending,
+    x="Date",
+    y="Amount",
+    markers=True,
+    title="Daily Spending",
+    labels={"Amount": "Spending (PLN)", "Date": "Transaction Date"},
+)
+
+st.plotly_chart(trend_fig, use_container_width=True)
+
+
 st.subheader("Spending by Category")
 
 category_totals = (
@@ -200,6 +221,22 @@ else:
         use_container_width=True,
         hide_index=True,
     )
+
+
+st.subheader("Export Your Results")
+
+export_data = analyzed.copy()
+export_data["Date"] = export_data["Date"].dt.strftime("%Y-%m-%d")
+
+csv_data = export_data.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    label="Download Analyzed Transactions (CSV)",
+    data=csv_data,
+    file_name="analyzed_transactions.csv",
+    mime="text/csv",
+)
+
 
 with st.expander("View all analyzed transactions"):
     st.dataframe(
