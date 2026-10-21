@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from sklearn.ensemble import IsolationForest
 
 st.set_page_config(
     page_title="Where Did My Money Go?",
@@ -26,7 +27,6 @@ def validate_transactions(data):
         return None, f"Missing required columns: {', '.join(missing)}"
 
     data = data[REQUIRED_COLUMNS].copy()
-
     data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
     data["Amount"] = pd.to_numeric(data["Amount"], errors="coerce")
 
@@ -34,15 +34,61 @@ def validate_transactions(data):
     data = data.loc[~invalid_rows].copy()
 
     data["Category"] = data["Category"].fillna("Other").astype(str)
-    data["Description"] = data["Description"].fillna("No description").astype(str)
+    data["Description"] = (
+        data["Description"].fillna("No description").astype(str)
+    )
 
-    # Expenses should be positive numbers in this demo.
     data = data[data["Amount"] > 0].copy()
 
     if data.empty:
         return None, "No valid positive transactions were found."
 
     return data, None
+
+
+def detect_anomalies(data):
+    result = data.copy()
+
+    # With very little data, the model cannot learn a useful pattern.
+    if len(result) < 5 or result["Amount"].nunique() < 2:
+        result["Anomaly"] = "Not evaluated"
+        result["Anomaly Score"] = 0.0
+        result["Reason"] = (
+            "Not enough varied transactions for reliable detection."
+        )
+        return result
+
+    # Use transaction amount as the first and simplest ML feature.
+    model = IsolationForest(
+        n_estimators=100,
+        contamination="auto",
+        random_state=42,
+    )
+
+    predictions = model.fit_predict(result[["Amount"]])
+    scores = model.decision_function(result[["Amount"]])
+
+    result["Anomaly"] = [
+        "Unusual" if prediction == -1 else "Normal"
+        for prediction in predictions
+    ]
+
+    # Lower decision scores indicate more unusual observations.
+    result["Anomaly Score"] = scores
+
+    median_amount = result["Amount"].median()
+
+    def explain_row(row):
+        if row["Anomaly"] != "Unusual":
+            return "No unusual amount pattern detected."
+
+        if row["Amount"] > median_amount:
+            return "Amount is unusually high compared with this dataset."
+
+        return "Amount is unusually low compared with this dataset."
+
+    result["Reason"] = result.apply(explain_row, axis=1)
+    return result
 
 
 st.sidebar.header("Transaction Data")
@@ -82,19 +128,24 @@ else:
 
     st.sidebar.info("Using fictional sample transactions.")
 
-total_spending = transactions["Amount"].sum()
-average_transaction = transactions["Amount"].mean()
-largest_transaction = transactions["Amount"].max()
+# Run the machine-learning model.
+analyzed = detect_anomalies(transactions)
 
-col1, col2, col3 = st.columns(3)
+total_spending = analyzed["Amount"].sum()
+average_transaction = analyzed["Amount"].mean()
+largest_transaction = analyzed["Amount"].max()
+unusual_count = (analyzed["Anomaly"] == "Unusual").sum()
+
+col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total Spending", f"{total_spending:.2f} PLN")
 col2.metric("Average Transaction", f"{average_transaction:.2f} PLN")
 col3.metric("Largest Transaction", f"{largest_transaction:.2f} PLN")
+col4.metric("Unusual Transactions", int(unusual_count))
 
 st.subheader("Spending by Category")
 
 category_totals = (
-    transactions.groupby("Category", as_index=False)["Amount"]
+    analyzed.groupby("Category", as_index=False)["Amount"]
     .sum()
     .sort_values("Amount", ascending=False)
 )
@@ -110,10 +161,37 @@ fig = px.bar(
 
 st.plotly_chart(fig, use_container_width=True)
 
-st.subheader("Your Transactions")
-st.dataframe(transactions, use_container_width=True, hide_index=True)
+st.subheader("Machine Learning Results")
+st.write(
+    "Isolation Forest compares transaction amounts and flags observations "
+    "that look unusual within the uploaded dataset."
+)
+
+unusual = analyzed[analyzed["Anomaly"] == "Unusual"]
+
+if unusual.empty:
+    st.success("No unusual transactions were detected in this dataset.")
+else:
+    st.warning(
+        f"{len(unusual)} transaction(s) were flagged for review. "
+        "This does not mean they are fraudulent."
+    )
+    st.dataframe(
+        unusual[
+            ["Date", "Category", "Description", "Amount", "Anomaly Score", "Reason"]
+        ].sort_values("Anomaly Score"),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+with st.expander("View all analyzed transactions"):
+    st.dataframe(
+        analyzed.sort_values("Date", ascending=False),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 st.caption(
     "Demo application using fictional or user-provided data. "
-    "All amounts are treated as expenses in PLN."
+    "Anomaly flags are statistical clues, not proof of fraud."
 )
